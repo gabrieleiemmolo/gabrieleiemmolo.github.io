@@ -791,15 +791,6 @@
     </style>
 </head>
 <body>
-    <!-- Menu a tendina in alto a sinistra -->
-    <div style="position: fixed; top: 20px; left: 16px; z-index: 100;">
-        <div class="dropdown">
-            <button class="dropbtn" id="menuDropdownBtn">☰</button>
-            <div class="dropdown-content" id="menuDropdownContent">
-                <a href="#" id="storico-link">Storico Allenamenti</a>
-            </div>
-        </div>
-    </div>
 
 <!-- Sidebar per il menu -->
 <div id="sidebar-menu" class="sidebar">
@@ -929,24 +920,37 @@
     <script>
     // Gestione menu a tendina
     document.addEventListener('DOMContentLoaded', function() {
-        const btn = document.getElementById('menuDropdownBtn');
-        const content = document.getElementById('menuDropdownContent');
-        // Aggiungi voce menu se non presente
-        if (!content.querySelector('a')) {
-            const a = document.createElement('a');
-            a.href = '#';
-            a.textContent = 'Storico Allenamenti';
-            a.onclick = function() { window.showStorico(); };
-            content.appendChild(a);
-        }
-        btn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            content.parentElement.classList.toggle('show');
-        });
-        document.addEventListener('click', function() {
-            content.parentElement.classList.remove('show');
-        });
+    const sidebar = document.getElementById('sidebar-menu');
+    const openBtn = document.getElementById('openSidebarBtn');
+    const closeBtn = document.getElementById('closeSidebarBtn');
+    const storicoLink = document.getElementById('sidebar-storico-link');
+
+    // Apri sidebar
+    openBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        sidebar.classList.add('open');
     });
+
+    // Chiudi sidebar
+    closeBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        sidebar.classList.remove('open');
+    });
+
+    // Chiudi sidebar cliccando fuori
+    document.addEventListener('click', function(e) {
+        if (!sidebar.contains(e.target) && e.target !== openBtn) {
+            sidebar.classList.remove('open');
+        }
+    });
+
+    // Apri storico e chiudi sidebar
+    storicoLink.addEventListener('click', function(e) {
+        e.preventDefault();
+        sidebar.classList.remove('open');
+        window.showStorico();
+    });
+});
 
     
 
@@ -1449,14 +1453,18 @@ window.showStoricoGiorni = async function(mese, settimana) {
     const giorni = ['lunedi','martedi','mercoledi','giovedi','venerdi','sabato','domenica'];
     let html = '<div style="margin-bottom:16px;">Seleziona giorno:</div><div class="day-filter">';
     giorni.forEach(day => {
-        html += `<button class="day-btn" onclick="window.showStoricoList('${mese}',${settimana},'${day}')">${getDayName(day)}</button>`;
+        html += `<button class="day-btn" onclick="window.showStoricoList('${mese}',${settimana},'${day}', this)">${getDayName(day)}</button>`;
     });
     html += '</div>';
     document.getElementById('storico-giorni').innerHTML = html;
     document.getElementById('storico-list').innerHTML = '';
 }
 
-window.showStoricoList = async function(mese, settimana, day) {
+window.showStoricoList = async function(mese, settimana, day, btn) {
+    // Gestione colore attivo
+    document.querySelectorAll('#storico-giorni .day-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+
     const history = await loadExerciseHistory();
     const filtered = history.filter(item =>
         getMonthYear(item.completedAt) === mese &&
