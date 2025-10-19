@@ -261,6 +261,7 @@
             margin-top: 8px;
             display: block;
         }
+        .timer-display { font-size: 24px; font-weight: 600; color: var(--ios-blue); text-align: center; margin-top: 10px;}
 
         /* Day Filters */
         .day-filter {
@@ -438,12 +439,31 @@
                 <section class="section-card">
                     <h2 class="section-title">💪 Aggiungi Esercizio</h2>
                     <div class="form-group"><label for="exercise-day">Giorno</label><select id="exercise-day" class="form-control"></select></div>
-                    <div class="form-group"><label for="exercise-name">Nome Esercizio</label><input type="text" id="exercise-name" class="form-control" placeholder="Es. Panca Piana"></div>
-                    <div style="display:flex; gap:12px;">
-                        <div class="form-group" style="flex:1;"><label for="exercise-sets">Serie</label><input type="number" id="exercise-sets" class="form-control" placeholder="4"></div>
-                        <div class="form-group" style="flex:1;"><label for="exercise-reps">Ripetizioni</label><input type="text" id="exercise-reps" class="form-control" placeholder="8-10"></div>
-                        <div class="form-group" style="flex:1;"><label for="exercise-order">Ordine</label><input type="number" id="exercise-order" class="form-control" placeholder="1"></div>
+                    <div class="form-group">
+                        <label for="exercise-type">Tipo Esercizio</label>
+                        <select id="exercise-type" class="form-control" onchange="handleExerciseTypeChange()">
+                            <option value="standard">Standard</option>
+                            <option value="corpo_libero">Corpo Libero</option>
+                            <option value="dropset">Super Serie (Peso a Scendere)</option>
+                            <option value="pausa">Pausa</option>
+                        </select>
                     </div>
+                    <div class="form-group"><label for="exercise-name">Nome Esercizio</label><input type="text" id="exercise-name" class="form-control" placeholder="Es. Panca Piana"></div>
+                    
+                    <div id="standard-inputs">
+                        <div style="display:flex; gap:12px;">
+                            <div class="form-group" style="flex:1;"><label for="exercise-sets">Serie</label><input type="number" id="exercise-sets" class="form-control" placeholder="4"></div>
+                            <div class="form-group" style="flex:1;"><label for="exercise-reps">Ripetizioni</label><input type="text" id="exercise-reps" class="form-control" placeholder="8-10"></div>
+                        </div>
+                    </div>
+                    <div id="dropset-inputs" class="hidden">
+                        <div class="form-group"><label for="exercise-reps-dropset">Ripetizioni per Serie (separate da virgola)</label><input type="text" id="exercise-reps-dropset" class="form-control" placeholder="8, 10, 12, 14"></div>
+                    </div>
+                     <div id="pause-inputs" class="hidden">
+                        <div class="form-group"><label for="exercise-duration">Durata Pausa (minuti)</label><input type="number" id="exercise-duration" class="form-control" placeholder="3"></div>
+                    </div>
+
+                    <div class="form-group"><label for="exercise-order">Ordine</label><input type="number" id="exercise-order" class="form-control" placeholder="1"></div>
                     <button onclick="addExercise()" class="btn btn-primary">Aggiungi Esercizio</button>
                 </section>
                 <section class="section-card">
@@ -523,12 +543,13 @@
         let currentSessionDay = null, currentDietSessionDay = null;
         let editingItem = { id: null, type: null };
         let exerciseProgress = {};
+        let activeTimers = {};
 
         const $ = (s) => document.querySelector(s);
         const $$ = (s) => document.querySelectorAll(s);
 
         // --- UTILITY FUNCTIONS ---
-        function triggerHapticFeedback() { if (navigator.vibrate) navigator.vibrate(50); }
+        function triggerHapticFeedback() { if (navigator.vibrate) navigator.vibrate([50, 50, 50]); }
         function showToast(message, type = 'info') {
             const toast = $('#toast');
             toast.textContent = message;
@@ -540,15 +561,13 @@
         
         // --- AUTH FUNCTIONS ---
         async function loginUser() {
-            const btn = $('#login-btn');
-            btn.disabled = true;
+            const btn = $('#login-btn'); btn.disabled = true;
             try { await signInWithEmailAndPassword(auth, $('#login-email').value, $('#login-password').value); } 
             catch (e) { showToast('Email o password errati.', 'error'); }
             finally { btn.disabled = false; }
         }
         async function registerUser() {
-            const btn = $('#register-btn');
-            btn.disabled = true;
+            const btn = $('#register-btn'); btn.disabled = true;
             const [email, pass, conf] = [$('#register-email').value, $('#register-password').value, $('#register-password-confirm').value];
             if (!email || !pass || !conf) { btn.disabled = false; return showToast('Compila tutti i campi.', 'error'); }
             if (pass !== conf) { btn.disabled = false; return showToast('Le password non coincidono.', 'error'); }
@@ -597,11 +616,28 @@
                 <div class="form-group"><label>Giorno</label><select id="edit-item-day" class="form-control">${generateDayOptions(item.day)}</select></div>
                 <div class="form-group"><label>Nome</label><input type="text" id="edit-item-name" class="form-control" value="${item.name}"></div>
                 ${isExercise ? `
-                    <div style="display:flex; gap:12px;">
-                        <div class="form-group" style="flex:1;"><label>Serie</label><input type="number" id="edit-item-sets" class="form-control" value="${item.sets}"></div>
-                        <div class="form-group" style="flex:1;"><label>Rip.</label><input type="text" id="edit-item-reps" class="form-control" value="${item.reps}"></div>
-                        <div class="form-group" style="flex:1;"><label>Ordine</label><input type="number" id="edit-item-order" class="form-control" value="${item.order}"></div>
+                    <div class="form-group">
+                        <label>Tipo Esercizio</label>
+                        <select id="edit-item-type" class="form-control" onchange="handleExerciseTypeChange(true)">
+                            <option value="standard" ${item.type === 'standard' ? 'selected': ''}>Standard</option>
+                            <option value="corpo_libero" ${item.type === 'corpo_libero' ? 'selected': ''}>Corpo Libero</option>
+                            <option value="dropset" ${item.type === 'dropset' ? 'selected': ''}>Super Serie</option>
+                            <option value="pausa" ${item.type === 'pausa' ? 'selected': ''}>Pausa</option>
+                        </select>
                     </div>
+                    <div id="edit-standard-inputs">
+                        <div style="display:flex; gap:12px;">
+                            <div class="form-group" style="flex:1;"><label>Serie</label><input type="number" id="edit-item-sets" class="form-control" value="${item.sets}"></div>
+                            <div class="form-group" style="flex:1;"><label>Rip.</label><input type="text" id="edit-item-reps" class="form-control" value="${item.reps}"></div>
+                        </div>
+                    </div>
+                    <div id="edit-dropset-inputs" class="hidden">
+                        <div class="form-group"><label>Ripetizioni per Serie</label><input type="text" id="edit-item-reps-dropset" class="form-control" value="${Array.isArray(item.reps) ? item.reps.join(', ') : ''}"></div>
+                    </div>
+                    <div id="edit-pause-inputs" class="hidden">
+                         <div class="form-group"><label>Durata (minuti)</label><input type="number" id="edit-item-duration" class="form-control" value="${item.duration || ''}"></div>
+                    </div>
+                    <div class="form-group"><label>Ordine</label><input type="number" id="edit-item-order" class="form-control" value="${item.order}"></div>
                 ` : `
                     <div style="display:flex; gap:12px;">
                         <div class="form-group" style="flex:1;"><label>Quantità (g)</label><input type="number" id="edit-item-quantity" class="form-control" value="${item.quantity}"></div>
@@ -618,22 +654,30 @@
                 </div>
             `;
             openModal(`Modifica ${isExercise ? 'Esercizio' : 'Alimento'}`, formHTML);
+            if(isExercise) handleExerciseTypeChange(true);
         }
 
         async function updateItem() {
             const { type, id } = editingItem;
             const isExercise = type === 'exercise';
-            let updatedData = {
-                day: $('#edit-item-day').value,
-                name: $('#edit-item-name').value,
-            };
+            let updatedData = { day: $('#edit-item-day').value, name: $('#edit-item-name').value };
 
             if (isExercise) {
-                Object.assign(updatedData, {
-                    sets: parseInt($('#edit-item-sets').value),
-                    reps: $('#edit-item-reps').value,
-                    order: parseInt($('#edit-item-order').value)
-                });
+                const exType = $('#edit-item-type').value;
+                Object.assign(updatedData, { type: exType, order: parseInt($('#edit-item-order').value) });
+                
+                if (exType === 'dropset') {
+                    const repsArray = $('#edit-item-reps-dropset').value.split(',').map(s => s.trim()).filter(Boolean);
+                    updatedData.reps = repsArray;
+                    updatedData.sets = repsArray.length;
+                } else if (exType === 'pausa') {
+                    updatedData.duration = parseFloat($('#edit-item-duration').value);
+                    updatedData.sets = 1;
+                    updatedData.reps = `${updatedData.duration} min`;
+                } else {
+                    updatedData.sets = parseInt($('#edit-item-sets').value);
+                    updatedData.reps = $('#edit-item-reps').value;
+                }
             } else {
                  Object.assign(updatedData, {
                     quantity: parseInt($('#edit-item-quantity').value),
@@ -700,6 +744,7 @@
         }
 
         function createExerciseHTML(ex) {
+            const repsDisplay = Array.isArray(ex.reps) ? ex.reps.join(' - ') : ex.reps;
             return `
             <div class="item">
                 <div class="item-header">
@@ -709,7 +754,7 @@
                         <button class="action-btn btn-delete" onclick="confirmDeleteItem('exercise', '${ex.id}')">🗑️</button>
                     </div>
                 </div>
-                <div class="item-details">${ex.sets} x ${ex.reps}</div>
+                <div class="item-details">${ex.sets} x ${repsDisplay}</div>
             </div>`;
         }
         
@@ -769,18 +814,44 @@
             container.innerHTML = sessionExercises.map(ex => {
                 const setsDone = completedSets[ex.id] || 0;
                 const isCompleted = setsDone >= ex.sets;
+                
+                if (ex.type === 'pausa') {
+                    return `
+                    <div class="item session-item ${isCompleted ? 'completed' : ''}" id="item-${ex.id}">
+                        <div class="item-header">
+                            <div class="item-name">#${ex.order} ${ex.name}</div>
+                            <div class="exercise-status">${isCompleted ? 'Fatto!' : 'In attesa'}</div>
+                        </div>
+                        <div class="item-details">Durata: ${ex.duration} minuti</div>
+                        <div class="timer-display" id="timer-${ex.id}"></div>
+                        ${!isCompleted ? `<button class="btn btn-primary" style="margin-top:10px;" onclick="startTimer('${ex.id}')">Avvia Pausa</button>` : ''}
+                    </div>`;
+                }
+
                 const lastWeight = exerciseProgress[ex.id];
                 let setsHTML = Array.from({ length: ex.sets }, (_, i) => `<div class="set-indicator ${i < setsDone ? 'completed' : ''}"></div>`).join('');
+                let repsDisplay = '';
+                if (ex.type === 'dropset' && Array.isArray(ex.reps)) {
+                    repsDisplay = isCompleted ? `Completato: ${ex.reps.join('-')} reps` : `Prossima: ${ex.reps[setsDone]} reps`;
+                } else {
+                    repsDisplay = `${ex.sets} x ${ex.reps}`;
+                }
+
+                let lastWeightDisplay = '';
+                if(lastWeight) {
+                    const weightText = Array.isArray(lastWeight) ? lastWeight.join(' - ') : lastWeight;
+                    lastWeightDisplay = `<span class="last-weight">🏋️‍♀️ Ultimi: ${weightText} kg</span>`;
+                }
                 
                 return `
-                <div class="item session-item ${isCompleted ? 'completed' : ''}" onclick="completeOneSet('${ex.id}')">
+                <div class="item session-item ${isCompleted ? 'completed' : ''}" onclick="handleSessionItemClick('${ex.id}')">
                     <div class="item-header">
                         <div class="item-name">#${ex.order} ${ex.name}</div>
                         <div class="exercise-status">${isCompleted ? 'Fatto!' : `${setsDone}/${ex.sets}`}</div>
                     </div>
                     <div class="item-details">
-                        ${ex.sets} x ${ex.reps}
-                        ${lastWeight !== undefined ? `<span class="last-weight">🏋️‍♀️ Ultimo peso utilizzato: ${lastWeight} kg</span>` : ''}
+                        ${repsDisplay}
+                        ${lastWeightDisplay}
                     </div>
                     <div class="sets-progress">${setsHTML}</div>
                 </div>`;
@@ -788,16 +859,28 @@
              $('#reset-session-btn').classList.toggle('hidden', Object.keys(completedSets).length === 0);
         }
 
-        async function completeOneSet(id) {
-            triggerHapticFeedback();
+        function handleSessionItemClick(id) {
+            const exercise = sessionExercises.find(ex => ex.id === id);
+            if (!exercise || (exercise.type === 'pausa')) return;
+            completeOneSet(id);
+        }
+
+        async function completeOneSet(id, isTimerCompletion = false) {
+            if(!isTimerCompletion) triggerHapticFeedback();
             const exercise = sessionExercises.find(ex => ex.id === id);
             if (!exercise) return;
-            let current = completedSets[id] || 0;
-            const newCount = (current + 1) > exercise.sets ? 0 : current + 1;
+
+            let currentSets = completedSets[id] || 0;
+            const newCount = (currentSets + 1) > exercise.sets ? 0 : currentSets + 1;
             completedSets[id] = newCount;
             
-            if (newCount === exercise.sets) { // Show popup on last set
-                promptForWeight(id);
+            const isLastSet = newCount === exercise.sets;
+            const isDropset = exercise.type === 'dropset';
+
+            if (newCount > 0 && exercise.type !== 'corpo_libero' && exercise.type !== 'pausa') {
+                if (isDropset || isLastSet) {
+                    promptForWeight(id, newCount - 1);
+                }
             }
             
             const sessionDoc = (await loadData('sessions')).find(s => s.day === currentSessionDay);
@@ -912,7 +995,7 @@
             closeModal();
             showToast('Dieta di oggi azzerata.');
         }
-
+        
         // --- HISTORY/ARCHIVE FUNCTIONS ---
         async function loadArchivedWorkouts() {
             archives = await loadData('archivedWorkouts', 'archiveDate');
@@ -1005,35 +1088,59 @@
             showTab('workout');
         }
 
-        // --- WEIGHT TRACKING FUNCTIONS ---
+        // --- WEIGHT & TIMER FUNCTIONS ---
         async function loadExerciseProgress() {
             const progressData = (await loadData('exerciseProgress')).find(d => d.userId === currentUser.uid);
             exerciseProgress = progressData?.weights || {};
         }
 
-        function promptForWeight(exerciseId) {
-            const currentWeight = exerciseProgress[exerciseId] || '';
+        function promptForWeight(exerciseId, setIndex = null) {
+            const exercise = sessionExercises.find(e => e.id === exerciseId);
+            const isDropset = exercise.type === 'dropset';
+            const currentWeight = exerciseProgress[exerciseId];
+            let placeholder = 'Es. 50';
+            let title = 'Esercizio Completato!';
+
+            if (isDropset && Array.isArray(currentWeight)) {
+                placeholder = currentWeight[setIndex] || '';
+            } else if (!isDropset && currentWeight) {
+                placeholder = currentWeight;
+            }
+            if (isDropset) {
+                title = `Peso per Serie ${setIndex + 1}`;
+            }
+
             const content = `
                 <div class="form-group">
                     <label for="modal-weight-input">Peso utilizzato (in kg)</label>
-                    <input type="number" id="modal-weight-input" class="form-control" placeholder="Es. 50" value="${currentWeight}">
+                    <input type="number" id="modal-weight-input" class="form-control" placeholder="${placeholder}" value="">
                 </div>
                 <div class="modal-actions">
                     <button onclick="closeModal()" class="btn" style="background:var(--bg-tertiary)">Annulla</button>
-                    <button onclick="saveWeight('${exerciseId}')" class="btn btn-primary">Salva Peso</button>
+                    <button onclick="saveWeight('${exerciseId}', ${setIndex})" class="btn btn-primary">Salva Peso</button>
                 </div>
             `;
-            openModal('Esercizio Completato!', content);
+            openModal(title, content);
+             setTimeout(() => $('#modal-weight-input').focus(), 100);
         }
 
-        async function saveWeight(exerciseId) {
+        async function saveWeight(exerciseId, setIndex) {
             const input = $('#modal-weight-input');
             const newWeight = parseFloat(input.value);
             if (isNaN(newWeight) || newWeight < 0) {
                 return showToast('Inserisci un valore numerico valido.', 'error');
             }
             
-            exerciseProgress[exerciseId] = newWeight;
+            const isDropset = setIndex !== null;
+
+            if (isDropset) {
+                if (!Array.isArray(exerciseProgress[exerciseId])) {
+                    exerciseProgress[exerciseId] = [];
+                }
+                exerciseProgress[exerciseId][setIndex] = newWeight;
+            } else {
+                exerciseProgress[exerciseId] = newWeight;
+            }
             
             const progressDoc = (await loadData('exerciseProgress')).find(d => d.userId === currentUser.uid);
             if(progressDoc) {
@@ -1044,7 +1151,35 @@
 
             closeModal();
             showToast('Peso salvato!', 'success');
-            renderSession(); // Rerender to show the new weight
+            renderSession();
+        }
+
+        function startTimer(exerciseId) {
+            if (activeTimers[exerciseId]) return;
+            triggerHapticFeedback();
+            
+            const exercise = sessionExercises.find(ex => ex.id === exerciseId);
+            const timerEl = $(`#timer-${exerciseId}`);
+            const itemEl = $(`#item-${exerciseId}`);
+            if (!exercise || !timerEl || !itemEl) return;
+            
+            itemEl.querySelector('button').classList.add('hidden');
+            let remaining = exercise.duration * 60;
+
+            const formatTime = (s) => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+
+            timerEl.textContent = formatTime(remaining);
+            
+            activeTimers[exerciseId] = setInterval(() => {
+                remaining--;
+                timerEl.textContent = formatTime(remaining);
+                if(remaining <= 0) {
+                    clearInterval(activeTimers[exerciseId]);
+                    delete activeTimers[exerciseId];
+                    triggerHapticFeedback();
+                    completeOneSet(exerciseId, true);
+                }
+            }, 1000);
         }
 
         // --- EVENT HANDLERS & INITIALIZATION ---
@@ -1054,19 +1189,52 @@
             $('#' + tabName + '-tab').classList.add('active');
             $(`.tab-btn[onclick="showTab('${tabName}')"]`).classList.add('active');
         }
+        
+        function handleExerciseTypeChange(isModal = false) {
+            const prefix = isModal ? '#edit-' : '#';
+            const type = $(`${prefix}exercise-type`).value;
+            $(`${prefix}standard-inputs`).classList.toggle('hidden', type === 'dropset' || type === 'pausa');
+            $(`${prefix}dropset-inputs`).classList.toggle('hidden', type !== 'dropset');
+            $(`${prefix}pause-inputs`).classList.toggle('hidden', type !== 'pausa');
+             $(`${prefix}exercise-name`).placeholder = type === 'pausa' ? 'Es. Pausa Rest' : 'Es. Panca Piana';
+        }
 
         async function addExercise() {
+            const type = $('#exercise-type').value;
             const data = {
                 day: $('#exercise-day').value, name: $('#exercise-name').value,
-                sets: parseInt($('#exercise-sets').value), reps: $('#exercise-reps').value,
-                order: parseInt($('#exercise-order').value), userId: currentUser.uid
+                order: parseInt($('#exercise-order').value), userId: currentUser.uid, type: type
             };
-            if (!data.day || !data.name || !data.sets || !data.reps || !data.order) return showToast('Compila tutti i campi.', 'error');
+            
+            if (type === 'dropset') {
+                const repsArray = $('#exercise-reps-dropset').value.split(',').map(s => s.trim()).filter(Boolean);
+                if (repsArray.length === 0) return showToast('Inserisci ripetizioni valide per la super serie.', 'error');
+                data.reps = repsArray;
+                data.sets = repsArray.length;
+            } else if (type === 'pausa') {
+                data.duration = parseFloat($('#exercise-duration').value);
+                if (!data.duration || data.duration <= 0) return showToast('Inserisci una durata valida per la pausa.', 'error');
+                data.sets = 1;
+                data.reps = `${data.duration} min`;
+            }
+            else {
+                data.sets = parseInt($('#exercise-sets').value);
+                data.reps = $('#exercise-reps').value;
+            }
+            
+            if (!data.day || !data.name || !data.order) return showToast('Compila Giorno, Nome e Ordine.', 'error');
+            
             await addDoc(collection(db, 'exercises'), data);
             showToast('Esercizio aggiunto!', 'success');
-            $('#exercise-name').value = $('#exercise-reps').value = '';
+            
+            // Reset form
+            $('#exercise-name').value = '';
+            $('#exercise-reps').value = '';
+            $('#exercise-reps-dropset').value = '';
+            $('#exercise-duration').value = '';
             $('#exercise-order').value = parseInt(data.order) + 1;
             $('#exercise-name').focus();
+            
             await loadExercises();
         }
 
@@ -1130,7 +1298,7 @@
         window.showTab = showTab; window.loadSessionDay = loadSessionDay; window.loadDietSessionDay = loadDietSessionDay;
         window.addExercise = addExercise; window.filterByDay = filterByDay;
         window.addFood = addFood; window.filterFoodByDay = filterFoodByDay;
-        window.completeOneSet = completeOneSet; window.resetSession = resetSession;
+        window.handleSessionItemClick = handleSessionItemClick; window.completeOneSet = completeOneSet; window.resetSession = resetSession;
         window.confirmResetSession = confirmResetSession;
         window.toggleDietCompletion = toggleDietCompletion; window.resetDietSession = resetDietSession;
         window.confirmResetDietSession = confirmResetDietSession;
@@ -1139,6 +1307,8 @@
         window.confirmArchive = confirmArchive; window.archiveCurrentWorkout = archiveCurrentWorkout;
         window.confirmRestoreWorkout = confirmRestoreWorkout; window.restoreWorkout = restoreWorkout;
         window.saveWeight = saveWeight;
+        window.handleExerciseTypeChange = handleExerciseTypeChange;
+        window.startTimer = startTimer;
 
     </script>
 </body>
