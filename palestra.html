@@ -254,6 +254,13 @@
         }
         .set-indicator.completed { background: var(--ios-green); }
         .exercise-status, .food-status { font-size: 14px; color: var(--label-secondary); font-weight: 500;}
+        .last-weight {
+            font-size: 14px;
+            color: var(--ios-orange);
+            font-weight: 500;
+            margin-top: 8px;
+            display: block;
+        }
 
         /* Day Filters */
         .day-filter {
@@ -510,11 +517,12 @@
         const db = getFirestore(app);
         const auth = getAuth(app);
 
-        let exercises = [], foods = [], completedSets = {}, completedFoods = [];
+        let exercises = [], foods = [], archives = [], completedSets = {}, completedFoods = [];
         let sessionExercises = [], sessionFood = [];
         let currentUser, currentDayFilter = 'all', currentFoodDayFilter = 'all';
         let currentSessionDay = null, currentDietSessionDay = null;
         let editingItem = { id: null, type: null };
+        let exerciseProgress = {};
 
         const $ = (s) => document.querySelector(s);
         const $$ = (s) => document.querySelectorAll(s);
@@ -560,7 +568,7 @@
                 $('#main-app').classList.remove('hidden');
                 $('#user-email').textContent = user.email.split('@')[0];
                 showLoading(true);
-                await Promise.all([loadExercises(), loadFoods(), loadArchivedWorkouts()]);
+                await Promise.all([loadExercises(), loadFoods(), loadArchivedWorkouts(), loadExerciseProgress()]);
                 showLoading(false);
             } else {
                 currentUser = null;
@@ -761,6 +769,7 @@
             container.innerHTML = sessionExercises.map(ex => {
                 const setsDone = completedSets[ex.id] || 0;
                 const isCompleted = setsDone >= ex.sets;
+                const lastWeight = exerciseProgress[ex.id];
                 let setsHTML = Array.from({ length: ex.sets }, (_, i) => `<div class="set-indicator ${i < setsDone ? 'completed' : ''}"></div>`).join('');
                 
                 return `
@@ -769,7 +778,10 @@
                         <div class="item-name">#${ex.order} ${ex.name}</div>
                         <div class="exercise-status">${isCompleted ? 'Fatto!' : `${setsDone}/${ex.sets}`}</div>
                     </div>
-                    <div class="item-details">${ex.sets} x ${ex.reps}</div>
+                    <div class="item-details">
+                        ${ex.sets} x ${ex.reps}
+                        ${lastWeight !== undefined ? `<span class="last-weight">🏋️‍♀️ Ultimo peso utilizzato: ${lastWeight} kg</span>` : ''}
+                    </div>
                     <div class="sets-progress">${setsHTML}</div>
                 </div>`;
             }).join('');
@@ -781,7 +793,12 @@
             const exercise = sessionExercises.find(ex => ex.id === id);
             if (!exercise) return;
             let current = completedSets[id] || 0;
-            completedSets[id] = (current + 1) > exercise.sets ? 0 : current + 1;
+            const newCount = (current + 1) > exercise.sets ? 0 : current + 1;
+            completedSets[id] = newCount;
+            
+            if (newCount === exercise.sets) { // Show popup on last set
+                promptForWeight(id);
+            }
             
             const sessionDoc = (await loadData('sessions')).find(s => s.day === currentSessionDay);
             if (sessionDoc) {
@@ -898,7 +915,7 @@
 
         // --- HISTORY/ARCHIVE FUNCTIONS ---
         async function loadArchivedWorkouts() {
-            const archives = await loadData('archivedWorkouts', 'archiveDate');
+            archives = await loadData('archivedWorkouts', 'archiveDate');
             renderArchives(archives);
         }
 
@@ -938,7 +955,7 @@
         async function archiveCurrentWorkout() {
             closeModal();
             showLoading(true);
-            const exercisesToArchive = exercises.map(({id, userId, ...rest}) => rest); // Rimuove id e userId
+            const exercisesToArchive = exercises.map(({id, userId, ...rest}) => rest);
             await addDoc(collection(db, 'archivedWorkouts'), {
                 userId: currentUser.uid,
                 archiveDate: new Date(),
@@ -968,16 +985,13 @@
             closeModal();
             showLoading(true);
             
-            // 1. Delete current exercises
             const deleteBatch = writeBatch(db);
             exercises.forEach(ex => deleteBatch.delete(doc(db, 'exercises', ex.id)));
             await deleteBatch.commit();
             
-            // 2. Fetch archived exercises
-            const archiveDoc = await getDocs(query(collection(db, 'archivedWorkouts'), where('__name__', '==', archiveId)));
-            const archivedExercises = archiveDoc.docs[0].data().exercises;
+            const archiveDocSnap = await getDocs(query(collection(db, 'archivedWorkouts'), where('__name__', '==', archiveId)));
+            const archivedExercises = archiveDocSnap.docs[0].data().exercises;
             
-            // 3. Add archived exercises to current schedule
             const addBatch = writeBatch(db);
             archivedExercises.forEach(ex => {
                 const newDocRef = doc(collection(db, 'exercises'));
@@ -991,6 +1005,47 @@
             showTab('workout');
         }
 
+        // --- WEIGHT TRACKING FUNCTIONS ---
+        async function loadExerciseProgress() {
+            const progressData = (await loadData('exerciseProgress')).find(d => d.userId === currentUser.uid);
+            exerciseProgress = progressData?.weights || {};
+        }
+
+        function promptForWeight(exerciseId) {
+            const currentWeight = exerciseProgress[exerciseId] || '';
+            const content = `
+                <div class="form-group">
+                    <label for="modal-weight-input">Peso utilizzato (in kg)</label>
+                    <input type="number" id="modal-weight-input" class="form-control" placeholder="Es. 50" value="${currentWeight}">
+                </div>
+                <div class="modal-actions">
+                    <button onclick="closeModal()" class="btn" style="background:var(--bg-tertiary)">Annulla</button>
+                    <button onclick="saveWeight('${exerciseId}')" class="btn btn-primary">Salva Peso</button>
+                </div>
+            `;
+            openModal('Esercizio Completato!', content);
+        }
+
+        async function saveWeight(exerciseId) {
+            const input = $('#modal-weight-input');
+            const newWeight = parseFloat(input.value);
+            if (isNaN(newWeight) || newWeight < 0) {
+                return showToast('Inserisci un valore numerico valido.', 'error');
+            }
+            
+            exerciseProgress[exerciseId] = newWeight;
+            
+            const progressDoc = (await loadData('exerciseProgress')).find(d => d.userId === currentUser.uid);
+            if(progressDoc) {
+                await updateDoc(doc(db, 'exerciseProgress', progressDoc.id), { weights: exerciseProgress });
+            } else {
+                await addDoc(collection(db, 'exerciseProgress'), { userId: currentUser.uid, weights: exerciseProgress });
+            }
+
+            closeModal();
+            showToast('Peso salvato!', 'success');
+            renderSession(); // Rerender to show the new weight
+        }
 
         // --- EVENT HANDLERS & INITIALIZATION ---
         function showTab(tabName) {
@@ -1083,6 +1138,7 @@
         window.deleteItem = deleteItem; window.confirmDeleteItem = confirmDeleteItem;
         window.confirmArchive = confirmArchive; window.archiveCurrentWorkout = archiveCurrentWorkout;
         window.confirmRestoreWorkout = confirmRestoreWorkout; window.restoreWorkout = restoreWorkout;
+        window.saveWeight = saveWeight;
 
     </script>
 </body>
